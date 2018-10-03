@@ -1,20 +1,4 @@
-# Copyright 2015 Google Inc. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
 
-"""Trains and Evaluates the MNIST network using a feed dictionary."""
-# pylint: disable=missing-docstring
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -29,23 +13,13 @@ import numpy as np
 
 # Basic model parameters as external flags.
 flags = tf.app.flags
-gpu_num = 2
-flags.DEFINE_integer('batch_size', 10 , 'Batch size.')
+flags.DEFINE_integer('batch_size', 5 , 'Batch size.')
 FLAGS = flags.FLAGS
-
+def tower_acc(logit, labels):
+  correct_pred = tf.equal(tf.argmax(logit, 1), labels)
+  accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+  return accuracy
 def placeholder_inputs(batch_size):
-  """Generate placeholder variables to represent the input tensors.
-  These placeholders are used as inputs by the rest of the model building
-  code and will be fed from the downloaded data in the .run() loop, below.
-  Args:
-    batch_size: The batch size will be baked into both placeholders.
-  Returns:
-    images_placeholder: Images placeholder.
-    labels_placeholder: Labels placeholder.
-  """
-  # Note that the shapes of the placeholders match the shapes of the full
-  # image and label tensors, except the first dimension is now batch_size
-  # rather than the full size of the train or test data sets.
   images_placeholder = tf.placeholder(tf.float32, shape=(batch_size,
                                                          c3d_model.NUM_FRAMES_PER_CLIP,
                                                          c3d_model.CROP_SIZE,
@@ -55,7 +29,6 @@ def placeholder_inputs(batch_size):
   return images_placeholder, labels_placeholder
 
 def _variable_on_cpu(name, shape, initializer):
-  #with tf.device('/cpu:%d' % cpu_id):
   with tf.device('/cpu:0'):
     var = tf.get_variable(name, shape, initializer=initializer)
   return var
@@ -68,13 +41,13 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
   return var
 
 def run_test():
-  model_name = "./sports1m_finetuning_ucf101.model"
+  model_name = tf.train.latest_checkpoint('./models/')
   test_list_file = 'list/test.list'
   num_test_videos = len(list(open(test_list_file,'r')))
   print("Number of test videos={}".format(num_test_videos))
 
   # Get the sets of images and labels for training, validation, and
-  images_placeholder, labels_placeholder = placeholder_inputs(FLAGS.batch_size * gpu_num)
+  images_placeholder, labels_placeholder = placeholder_inputs(FLAGS.batch_size)
   with tf.variable_scope('var_name') as var_scope:
     weights = {
             'wc1': _variable_with_weight_decay('wc1', [3, 3, 3, 3, 64], 0.04, 0.00),
@@ -102,13 +75,9 @@ def run_test():
             'bd2': _variable_with_weight_decay('bd2', [4096], 0.04, 0.0),
             'out': _variable_with_weight_decay('bout', [c3d_model.NUM_CLASSES], 0.04, 0.0),
             }
-  logits = []
-  for gpu_index in range(0, gpu_num):
-    with tf.device('/gpu:%d' % gpu_index):
-      logit = c3d_model.inference_c3d(images_placeholder[gpu_index * FLAGS.batch_size:(gpu_index + 1) * FLAGS.batch_size,:,:,:,:], 0.6, FLAGS.batch_size, weights, biases)
-      logits.append(logit)
-  logits = tf.concat(logits,0)
-  norm_score = tf.nn.softmax(logits)
+  logit = c3d_model.inference_c3d(images_placeholder, 0.6, FLAGS.batch_size, weights, biases)
+  norm_score = tf.nn.softmax(logit)
+  accuracy = tower_acc(logit, labels_placeholder)
   saver = tf.train.Saver()
   sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
   init = tf.global_variables_initializer()
@@ -116,10 +85,9 @@ def run_test():
   # Create a saver for writing training checkpoints.
   saver.restore(sess, model_name)
   # And then after everything is built, start the training loop.
-  bufsize = 0
-  write_file = open("predict_ret.txt", "w+", bufsize)
+  write_file = open("predict_ret.txt", "w+")
   next_start_pos = 0
-  all_steps = int((num_test_videos - 1) / (FLAGS.batch_size * gpu_num) + 1)
+  all_steps = int((num_test_videos - 1) /FLAGS.batch_size + 1)
   for step in xrange(all_steps):
     # Fill a feed dictionary with the actual set of images and labels
     # for this particular training step.
@@ -127,7 +95,7 @@ def run_test():
     test_images, test_labels, next_start_pos, _, valid_len = \
             input_data.read_clip_and_label(
                     test_list_file,
-                    FLAGS.batch_size * gpu_num,
+                    FLAGS.batch_size,
                     start_pos=next_start_pos
                     )
     predict_score = norm_score.eval(
