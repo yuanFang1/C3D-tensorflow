@@ -8,36 +8,42 @@ import tensorflow as tf
 import PIL.Image as Image
 import random
 import numpy as np
-import cv2
+from scipy.misc import imread, imresize, imsave
 import time
 
-def get_frames_data(filename, num_frames_per_clip=16):
-  ''' Given a directory containing extracted frames, return a video clip of
-  (num_frames_per_clip) consecutive frames as a list of np arrays '''
-  ret_arr = []
-  s_index = 0
-  for parent, dirnames, filenames in os.walk(filename):
-    if(len(filenames)<num_frames_per_clip):
-      return [], s_index
-    filenames = sorted(filenames)
-    s_index = random.randint(0, len(filenames) - num_frames_per_clip)
-    for i in range(s_index, s_index + num_frames_per_clip):
-      image_name = str(filename) + '/' + str(filenames[i])
-      img = Image.open(image_name)
-      img_data = np.array(img)
-      ret_arr.append(img_data)
-  return ret_arr, s_index
+def get_frames_data(paths, offsets, size=(128, 171), crop_size=(112, 112), mode='RGB', interp='bilinear'):
+  assert mode in ('RGB', 'L'), 'Mode is either RGB or L'
 
-def read_clip_and_label(filename, batch_size, start_pos=-1, num_frames_per_clip=16, crop_size=112, shuffle=False):
-  lines = open(filename,'r')
+  clips = []
+  for file_name in paths:
+    # Read video frame
+    im = imread(file_name, mode=mode)
+
+    # Resize frame to init resolution and crop then resize to target resolution
+    if mode == 'RGB':
+      im = imresize(im, size=size, interp=interp)
+      data = im[offsets[0]:offsets[1], offsets[2]:offsets[3], :]
+      im = imresize(data, size=crop_size, interp=interp)
+    else:
+      im = imresize(im, size=size, interp=interp)
+      data = im[offsets[0]:offsets[1], offsets[2]:offsets[3]]
+      im = imresize(data, size=crop_size, interp=interp)
+
+    clips.append(im)
+
+  clips = np.array(clips, dtype=np.float32)
+
+  if mode == 'RGB':
+    return clips
+  return np.expand_dims(clips, axis=3)
+
+def read_clip_and_label(input_lines, batch_size, start_pos=-1, num_frames_per_clip=16, crop_size=112, shuffle=False):
   read_dirnames = []
   data = []
   label = []
   batch_index = 0
   next_batch_start = -1
-  lines = list(lines)
-  np_mean = np.load('crop_mean.npy').reshape([num_frames_per_clip, crop_size, crop_size, 3])
-  # Forcing shuffle, if start_pos is not specified
+  lines = input_lines
   if start_pos < 0:
     shuffle = True
   if shuffle:
@@ -56,35 +62,17 @@ def read_clip_and_label(filename, batch_size, start_pos=-1, num_frames_per_clip=
     tmp_label = line[1]
     if not shuffle:
       print("Loading a video clip from {}...".format(dirname))
-    tmp_data, _ = get_frames_data(dirname, num_frames_per_clip)
-    img_datas = [];
-    if(len(tmp_data)!=0):
-      for j in xrange(len(tmp_data)):
-        img = Image.fromarray(tmp_data[j].astype(np.uint8))
-        if(img.width>img.height):
-          scale = float(crop_size)/float(img.height)
-          img = np.array(cv2.resize(np.array(img),(int(img.width * scale + 1), crop_size))).astype(np.float32)
-        else:
-          scale = float(crop_size)/float(img.width)
-          img = np.array(cv2.resize(np.array(img),(crop_size, int(img.height * scale + 1)))).astype(np.float32)
-        crop_x = int((img.shape[0] - crop_size)/2)
-        crop_y = int((img.shape[1] - crop_size)/2)
-        img = img[crop_x:crop_x+crop_size, crop_y:crop_y+crop_size,:] - np_mean[j]
-        img_datas.append(img)
+    v_paths = [dirname + '/%05d.jpg' % (f + 1) for f in range(0, 0 + num_frames_per_clip)]
+    offsets = [8, 8 + 112, 30, 30 + 112]  # center crop
+    img_datas= get_frames_data(v_paths,offsets)
+    if(len(img_datas)!=0):
       data.append(img_datas)
       label.append(int(tmp_label))
       batch_index = batch_index + 1
       read_dirnames.append(dirname)
 
-  # pad (duplicate) data/label if less than batch_size
-  valid_len = len(data)
-  pad_len = batch_size - valid_len
-  if pad_len:
-    for i in range(pad_len):
-      data.append(img_datas)
-      label.append(int(tmp_label))
 
   np_arr_data = np.array(data).astype(np.float32)
   np_arr_label = np.array(label).astype(np.int64)
 
-  return np_arr_data, np_arr_label, next_batch_start, read_dirnames, valid_len
+  return np_arr_data, np_arr_label, next_batch_start, read_dirnames
