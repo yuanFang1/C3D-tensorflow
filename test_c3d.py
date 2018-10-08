@@ -26,8 +26,8 @@ class Config(object):
   batch_size = 3
   max_steps = 25000
   MOVING_AVERAGE_DECAY = 0.9999
-  train_list = 'list/train_ucf101.list'
-  test_list = 'list/test_ucf101.list'
+  train_list = 'list/train_ucf11.list'
+  test_list = 'list/test_ucf11.list'
   model_save_dir = './models'
   model_filename = tf.train.latest_checkpoint(model_save_dir)
   with tf.variable_scope('var_name') as var_scope:
@@ -61,13 +61,13 @@ def tower_acc(logit, labels):
   correct_pred = tf.equal(tf.argmax(logit, 1), labels)
   accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
   return accuracy
-def placeholder_inputs(batch_size):
-  images_placeholder = tf.placeholder(tf.float32, shape=(batch_size,
+def placeholder_inputs():
+  images_placeholder = tf.placeholder(tf.float32, shape=(None,
                                                          c3d_model.NUM_FRAMES_PER_CLIP,
                                                          c3d_model.CROP_SIZE,
                                                          c3d_model.CROP_SIZE,
                                                          c3d_model.CHANNELS))
-  labels_placeholder = tf.placeholder(tf.int64, shape=(batch_size))
+  labels_placeholder = tf.placeholder(tf.int64, shape=(None))
   return images_placeholder, labels_placeholder
 
 
@@ -79,7 +79,7 @@ def run_test():
   print("Number of test videos={}".format(num_test_videos))
 
   # Get the sets of images and labels for training, validation, and
-  images_placeholder, labels_placeholder = placeholder_inputs(config.batch_size)
+  images_placeholder, labels_placeholder = placeholder_inputs()
 
   logit = c3d_model.inference_c3d(images_placeholder, 0.6, config.weight_initial)
   norm_score = tf.nn.softmax(logit)

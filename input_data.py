@@ -62,6 +62,9 @@ def read_clip_and_label(input_lines, batch_size, start_pos=-1, num_frames_per_cl
     tmp_label = line[1]
     if not shuffle:
       print("Loading a video clip from {}...".format(dirname))
+    filenames = os.listdir(dirname)
+    if(len(filenames)<num_frames_per_clip):
+      continue
     v_paths = [dirname + '/%05d.jpg' % (f + 1) for f in range(0, 0 + num_frames_per_clip)]
     offsets = [8, 8 + 112, 30, 30 + 112]  # center crop
     img_datas= get_frames_data(v_paths,offsets)
